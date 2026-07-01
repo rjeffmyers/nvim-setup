@@ -28,24 +28,49 @@ have() { command -v "$1" >/dev/null 2>&1; }
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
 
 # --- CLI flags ---------------------------------------------------------------
-# VI_DEFAULT controls whether 'vi' is pointed at Neovim: ask (default) | yes | no
+# VI_DEFAULT: point 'vi' at Neovim:  ask (default) | yes | no
+# GUI:        install the goneovim GUI:  auto (default; skip if headless) | yes | no
 VI_DEFAULT=ask
+GUI=auto
 usage() {
   cat <<USAGE
-Usage: ./install.sh [--vi | --no-vi]
-  --vi      make 'vi' launch Neovim without prompting
-  --no-vi   leave 'vi' untouched without prompting
-  (default) prompt interactively about the 'vi' -> Neovim change
+Usage: ./install.sh [--vi|--no-vi] [--gui|--no-gui]
+  --vi       make 'vi' launch Neovim without prompting
+  --no-vi    leave 'vi' untouched without prompting
+  --gui      force-install the goneovim GUI even if no display is detected
+  --no-gui   skip the GUI (Neovim + config only) -- good for headless servers
+  (default)  prompt about 'vi'; auto-detect GUI (skipped on headless machines)
 USAGE
 }
 for arg in "$@"; do
   case "$arg" in
-    --vi)     VI_DEFAULT=yes ;;
-    --no-vi)  VI_DEFAULT=no ;;
+    --vi)      VI_DEFAULT=yes ;;
+    --no-vi)   VI_DEFAULT=no ;;
+    --gui)     GUI=yes ;;
+    --no-gui)  GUI=no ;;
     -h|--help) usage; exit 0 ;;
     *) warn "ignoring unknown argument: $arg" ;;
   esac
 done
+
+# --- is there a graphical environment worth installing a GUI for? -------------
+# Returns 0 (yes) / 1 (no). Honors --gui/--no-gui; otherwise auto-detects.
+has_gui() {
+  case "$GUI" in
+    yes) return 0 ;;
+    no)  return 1 ;;
+  esac
+  # A live display in this session (X11 or Wayland) is a clear yes.
+  if [ -n "${DISPLAY:-}" ] || [ -n "${WAYLAND_DISPLAY:-}" ]; then
+    return 0
+  fi
+  # No display in this shell (e.g. plain SSH): fall back to whether the system
+  # is configured to boot into a graphical session.
+  if have systemctl && [ "$(systemctl get-default 2>/dev/null)" = "graphical.target" ]; then
+    return 0
+  fi
+  return 1
+}
 
 [ -f "$CONFIG_SRC" ] || die "init.vim not found next to this script ($CONFIG_SRC)"
 
@@ -93,6 +118,10 @@ install_neovim() {
 # --- install goneovim GUI (best effort; config works without it) --------------
 # goneovim is chosen for its native drag-and-drop "open file" support.
 install_goneovim() {
+  if ! has_gui; then
+    log "No graphical environment detected -> skipping GUI (headless). Use --gui to force."
+    return
+  fi
   if have goneovim; then
     log "goneovim already installed"
     return

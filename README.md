@@ -17,6 +17,15 @@ goneovim install: Arch uses the AUR (`goneovim-bin`, needs an AUR helper such
 as `paru`); Debian/RHEL pull the latest GitHub release binary into
 `~/.local/bin`. Terminal `nvim` works regardless if the GUI step is skipped.
 
+### Headless machines
+The GUI step is **auto-skipped on headless servers** (no `$DISPLAY`/
+`$WAYLAND_DISPLAY` and a non-graphical default systemd target). Override the
+detection with flags:
+```sh
+./install.sh --no-gui   # never install the GUI (Neovim + config only)
+./install.sh --gui      # force the GUI even if no display is detected
+```
+
 ### Making `vi` launch Neovim (optional)
 By default the installer **prompts** whether to point `vi` at Neovim
 system-wide (Arch: symlink; Debian: `update-alternatives`; RHEL:

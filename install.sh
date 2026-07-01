@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 #
-# install.sh — set up a vi-faithful Neovim (+ Neovide GUI) on a new machine.
+# install.sh — set up a vi-faithful Neovim (+ goneovim GUI) on a new machine.
 #
 # Detects the distro family (Arch / Debian / RHEL derivatives), installs
-# Neovim if it is not already present, best-effort installs the Neovide GUI,
-# and copies init.vim (shipped alongside this script) into ~/.config/nvim/.
+# Neovim if it is not already present, best-effort installs the goneovim GUI
+# (native drag-and-drop file open), and copies init.vim (shipped alongside
+# this script) into ~/.config/nvim/.
 #
 # Usage:  git clone <repo> && cd <repo> && ./install.sh
 # Run as your normal user; the script calls sudo only for package installs.
@@ -89,29 +90,56 @@ install_neovim() {
   log "Neovim installed: $(nvim --version | head -1)"
 }
 
-# --- install Neovide GUI (best effort; config works without it) ---------------
-install_neovide() {
-  if have neovide; then
-    log "Neovide already installed"
+# --- install goneovim GUI (best effort; config works without it) --------------
+# goneovim is chosen for its native drag-and-drop "open file" support.
+install_goneovim() {
+  if have goneovim; then
+    log "goneovim already installed"
     return
   fi
-  log "Installing Neovide (GUI)..."
-  if [ "$FAMILY" = "arch" ]; then
-    if $SUDO pacman -S --needed --noconfirm neovide; then
-      log "Neovide installed"
-      return
-    fi
-  fi
-  # Debian/RHEL: not in default repos — try Flatpak, else advise manual install.
-  if have flatpak; then
-    if $SUDO flatpak install -y flathub dev.neovide.neovide; then
-      log "Neovide installed via Flatpak (run: flatpak run dev.neovide.neovide)"
-      return
-    fi
-  fi
-  warn "Neovide not auto-installed on this distro. Terminal 'nvim' is fully"
-  warn "configured. For the GUI, grab a release from https://neovide.dev or"
-  warn "install Flatpak then re-run this script."
+  log "Installing goneovim (GUI)..."
+  case "$FAMILY" in
+    arch)
+      # AUR package 'goneovim-bin' (prebuilt). Needs an AUR helper; do NOT run
+      # AUR helpers under sudo -- they invoke sudo themselves when needed.
+      local helper=""
+      for h in paru yay pikaur; do
+        if have "$h"; then helper="$h"; break; fi
+      done
+      if [ -n "$helper" ]; then
+        "$helper" -S --needed --noconfirm goneovim-bin && { log "goneovim installed via $helper"; return; }
+      else
+        warn "No AUR helper (paru/yay) found. Install one, then: paru -S goneovim-bin"
+      fi
+      ;;
+    debian|rhel)
+      install_goneovim_release && return
+      ;;
+  esac
+  warn "goneovim not auto-installed. Terminal 'nvim' is fully configured; grab a"
+  warn "release from https://github.com/akiyosi/goneovim/releases for the GUI."
+}
+
+# Fetch the latest goneovim Linux release into ~/.local (best effort).
+install_goneovim_release() {
+  have curl || { warn "curl required to fetch goneovim release"; return 1; }
+  have tar  || { warn "tar required to unpack goneovim release"; return 1; }
+  local api url tmp dest bin
+  api="https://api.github.com/repos/akiyosi/goneovim/releases/latest"
+  url="$(curl -fsSL "$api" 2>/dev/null | grep -oE 'https://[^"]*[Ll]inux[^"]*\.tar\.bz2' | head -1)"
+  [ -n "$url" ] || { warn "could not locate a goneovim Linux release asset"; return 1; }
+  tmp="$(mktemp -d)"
+  log "Downloading $(basename "$url")..."
+  curl -fsSL "$url" -o "$tmp/g.tar.bz2" || { warn "download failed"; rm -rf "$tmp"; return 1; }
+  tar xjf "$tmp/g.tar.bz2" -C "$tmp" || { warn "extract failed"; rm -rf "$tmp"; return 1; }
+  bin="$(find "$tmp" -maxdepth 3 -type f -name goneovim | head -1)"
+  [ -n "$bin" ] || { warn "goneovim binary not found in archive"; rm -rf "$tmp"; return 1; }
+  dest="$HOME/.local/share/goneovim"
+  rm -rf "$dest"; mkdir -p "$dest" "$HOME/.local/bin"
+  cp -r "$(dirname "$bin")/." "$dest/"
+  ln -sf "$dest/goneovim" "$HOME/.local/bin/goneovim"
+  rm -rf "$tmp"
+  log "Installed goneovim -> ~/.local/bin/goneovim (ensure ~/.local/bin is on PATH)"
 }
 
 # --- copy config (with backup) -----------------------------------------------
@@ -185,8 +213,8 @@ setup_vi_default() {
 
 # --- run ---------------------------------------------------------------------
 install_neovim
-install_neovide
+install_goneovim
 install_config
 setup_vi_default
 
-log "Done. Launch 'nvim' in a terminal, or 'neovide' for the GUI."
+log "Done. Launch 'nvim' in a terminal, or 'goneovim' for the GUI."

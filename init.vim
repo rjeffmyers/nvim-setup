@@ -8,12 +8,11 @@ set noautoindent       " no auto-indent (avoids paste 'staircase')
 set nosmarttab
 set clipboard=         " keep vim registers ("a, etc.) separate from the system clipboard
 
-" Mouse: OFF in the terminal (stays vi-pure), ON in the Neovide GUI.
-if exists('g:neovide')
-  set mouse=a
-else
-  set mouse=
-endif
+" Mouse: OFF in the terminal (stays vi-pure), ON in GUI frontends.
+" Neovide sets g:neovide; goneovim sets g:gonvim_running. Use VimEnter so the
+" check runs after the GUI has published its globals, regardless of load order.
+set mouse=
+autocmd VimEnter * if exists('g:neovide') || exists('g:gonvim_running') | set mouse=a | endif
 
 " Right-click context menu (Windows-gVim style): show the popup but DON'T move
 " the caret to the click point. The default 'popup_setpos' repositions the

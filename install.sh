@@ -26,6 +26,26 @@ die()  { printf '%s[error]%s %s\n' "$c_red" "$c_rst" "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 if [ "$(id -u)" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
 
+# --- CLI flags ---------------------------------------------------------------
+# VI_DEFAULT controls whether 'vi' is pointed at Neovim: ask (default) | yes | no
+VI_DEFAULT=ask
+usage() {
+  cat <<USAGE
+Usage: ./install.sh [--vi | --no-vi]
+  --vi      make 'vi' launch Neovim without prompting
+  --no-vi   leave 'vi' untouched without prompting
+  (default) prompt interactively about the 'vi' -> Neovim change
+USAGE
+}
+for arg in "$@"; do
+  case "$arg" in
+    --vi)     VI_DEFAULT=yes ;;
+    --no-vi)  VI_DEFAULT=no ;;
+    -h|--help) usage; exit 0 ;;
+    *) warn "ignoring unknown argument: $arg" ;;
+  esac
+done
+
 [ -f "$CONFIG_SRC" ] || die "init.vim not found next to this script ($CONFIG_SRC)"
 
 # --- detect distro family ----------------------------------------------------
@@ -108,9 +128,65 @@ install_config() {
   log "Installed config -> $CONFIG_DST"
 }
 
+# --- make 'vi' launch Neovim (opt-in; prompts unless --vi/--no-vi given) ------
+setup_vi_default() {
+  case "$VI_DEFAULT" in
+    no)  log "Leaving 'vi' unchanged (--no-vi)"; return ;;
+    yes) : ;;
+    ask)
+      if [ ! -t 0 ]; then
+        warn "Non-interactive shell; not touching 'vi'. Re-run with --vi to enable."
+        return
+      fi
+      printf '%s==>%s Make '\''vi'\'' launch Neovim system-wide (symlink, needs sudo)? [y/N] ' "$c_grn" "$c_rst"
+      local reply=""
+      read -r reply </dev/tty || true
+      case "$reply" in
+        [yY]|[yY][eE][sS]) : ;;
+        *) log "Leaving 'vi' unchanged"; return ;;
+      esac
+      ;;
+  esac
+
+  local nvim_bin; nvim_bin="$(command -v nvim)"
+  case "$FAMILY" in
+    arch)
+      # /usr/local/bin wins on PATH for both the user and sudo's secure_path.
+      $SUDO ln -sf "$nvim_bin" /usr/local/bin/vi
+      log "Linked /usr/local/bin/vi -> $nvim_bin"
+      # Also claim /usr/bin/vi (what vipw/visudo hardcode) IF no package owns it.
+      if [ -e /usr/bin/vi ] && pacman -Qo /usr/bin/vi >/dev/null 2>&1; then
+        warn "/usr/bin/vi is owned by a package; left as-is (remove the 'vi' pkg to fully switch)."
+      else
+        $SUDO ln -sf "$nvim_bin" /usr/bin/vi
+        log "Linked /usr/bin/vi -> $nvim_bin"
+      fi
+      ;;
+    debian)
+      # Use the alternatives system so dpkg stays happy.
+      if have update-alternatives; then
+        $SUDO update-alternatives --install /usr/bin/vi vi "$nvim_bin" 60
+        $SUDO update-alternatives --set vi "$nvim_bin"
+        log "Registered 'vi' alternative -> $nvim_bin"
+      else
+        $SUDO ln -sf "$nvim_bin" /usr/local/bin/vi
+        log "Linked /usr/local/bin/vi -> $nvim_bin"
+      fi
+      ;;
+    rhel)
+      # /usr/bin/vi is owned by vim-minimal; don't overwrite an rpm file.
+      $SUDO ln -sf "$nvim_bin" /usr/local/bin/vi
+      log "Linked /usr/local/bin/vi -> $nvim_bin"
+      warn "On RHEL, tools hardcoding /usr/bin/vi will still use the packaged vi."
+      ;;
+  esac
+  log "Tip: a shell alias (e.g. fish ~/.config/fish/functions/vi.fish) can still shadow this."
+}
+
 # --- run ---------------------------------------------------------------------
 install_neovim
 install_neovide
 install_config
+setup_vi_default
 
 log "Done. Launch 'nvim' in a terminal, or 'neovide' for the GUI."
